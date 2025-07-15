@@ -1,0 +1,7 @@
+LICENSE
+README.md
+pyproject.toml
+survey_vit.egg-info/PKG-INFO
+survey_vit.egg-info/SOURCES.txt
+survey_vit.egg-info/dependency_links.txt
+survey_vit.egg-info/top_level.txt

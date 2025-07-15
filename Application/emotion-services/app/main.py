@@ -13,7 +13,7 @@ from contextlib import asynccontextmanager
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    device = torch.device("xpu")
+    device = torch.device("cuda")
     start = time.time()
     inference.init_inference(device)
     print(f"All models warmed up in {time.time() - start:.2f} seconds.")
@@ -37,7 +37,7 @@ def read_root():
 @app.post("/upload")
 async def upload_image(
     file: UploadFile = File(...),
-    model: str = Form("vit_default")
+    model: str = Form("vit_b16.pth")
 ):
     start_time = time.time()
     try:
@@ -66,7 +66,7 @@ async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
     frame_count = 0
     start_time = time.time()
-    model_key = "vit_default"  # or choose dynamically if needed
+    model_key = "vit_b16.pth"  # or choose dynamically if needed
     while True:
         try:
             # Receive a frame (data URL string)

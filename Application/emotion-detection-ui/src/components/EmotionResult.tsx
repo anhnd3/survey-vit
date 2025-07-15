@@ -60,7 +60,8 @@ const EmotionResult: React.FC<EmotionResultProps> = ({ emotionResults }) => {
     <div className="emotion-result">
       <h3>Emotion Results</h3>
       {EMOTION_LIST.map((emo) => {
-        const value = emotionResults[emo] || 0;
+        let value = emotionResults[emo] || 0;
+        value *= 100; // Convert to percentage
         return (
           <div
             key={emo}

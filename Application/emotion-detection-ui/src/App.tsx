@@ -6,7 +6,7 @@ import LeftPanel from './components/LeftPanel';
 
 const App: React.FC = () => {
   const [emotionResults, setEmotionResults] = useState<{ [key: string]: number }>({});
-  const [selectedModel, setSelectedModel] = useState<string>('vit_default');
+  const [selectedModel, setSelectedModel] = useState<string>('vit_b16.pth');
 
   const handleResult = (results: { [key: string]: number }) => {
     setEmotionResults(results);
@@ -30,31 +30,31 @@ const App: React.FC = () => {
           <label>
             <input
               type="radio"
-              value="vit_default"
-              checked={selectedModel === 'vit_default'}
+              value="vit_b16.pth"
+              checked={selectedModel === 'vit_b16.pth'}
               onChange={(e) => setSelectedModel(e.target.value)}
             />
-            ViT Default
+            VIT B16
           </label>
           <br />
           <label>
             <input
               type="radio"
-              value="resnet50"
-              checked={selectedModel === 'resnet50'}
+              value="TransNeXt-B.pth"
+              checked={selectedModel === 'TransNeXt-B.pth'}
               onChange={(e) => setSelectedModel(e.target.value)}
             />
-            Resnet
+            TransNeXt-B
           </label>
           <br />
           <label>
             <input
               type="radio"
-              value="vit_2"
-              checked={selectedModel === 'vit_optimized'}
+              value="ShuffleViT-DFER.t7"
+              checked={selectedModel === 'ShuffleViT-DFER.t7'}
               onChange={(e) => setSelectedModel(e.target.value)}
             />
-            ViT 2
+            ShuffleViT-DFER
           </label>
         </div>
         <EmotionResult emotionResults={emotionResults} />

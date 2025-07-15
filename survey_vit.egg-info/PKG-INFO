@@ -1,0 +1,12 @@
+Metadata-Version: 2.4
+Name: survey-vit
+Version: 0.0.1
+Summary: Emotion-recognition demo with ViT variants
+Author: Your Name
+Project-URL: repository, https://github.com/anhnd3/survey-vit
+Requires-Python: >=3.13
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Dynamic: license-file
+
+# survey-vit

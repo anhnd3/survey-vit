@@ -1,171 +1,163 @@
-import os
+"""
+Application.emotion_services.app.inference
+-----------------------------------------
+
+Light-weight orchestration layer that wires together the *separate* backbone
+loaders (vit.py, resnet.py, transnext.py, shufflevit.py).  Nothing model-
+specific lives here any more; each loader file owns its own preprocessing and
+classifier-head tweaks.
+
+Run the service from the repo root with either:
+
+    uvicorn Application.emotion_services.app.main:app --reload
+or
+    python  -m Application.emotion_services.app.main
+"""
+
+from __future__ import annotations
+
+import pathlib
+from typing import Dict, Tuple
+
 import torch
-import torch.nn as nn
-import torchvision.models as models
 import torchvision.transforms as T
-from PIL import Image, ImageDraw, ImageFont
 import cv2
 import numpy as np
-from typing import Tuple
+from PIL import Image
 from tqdm import tqdm
 
-# Number of emotion classes and their labels.
+# ------------------------------------------------------------
+# 1. Constants
+# ------------------------------------------------------------
 NUM_CLASSES = 7
 EMOTION_CLASSES = ["angry", "disgust", "fear", "happy", "neutral", "sad", "surprised"]
 
-def load_emotion_pretrained_model_local(model_path: str, device: torch.device, optimized: bool = False) -> nn.Module:
-    """
-    Loads a local ViT-B/16 model for emotion recognition from the given model_path.
-    If optimized is True, use a Sequential header with Dropout followed by Linear.
-    Otherwise, use a single Linear layer.
-    """
-    try:
-        print(f"Loading local ViT-B/16 model from {model_path} ...")
-        model = models.vit_b_16(weights=None)
-        if optimized:
-            # Use a Sequential header with Dropout (p=0.1) followed by Linear layer.
-            model.heads = nn.Sequential(
-                nn.Dropout(p=0.1),
-                nn.Linear(768, NUM_CLASSES)
-            )
-        else:
-            # Use a simple Linear layer.
-            model.heads = nn.Linear(768, NUM_CLASSES)
-        model = model.to(device)
-        state_dict = torch.load(model_path, map_location=device)
-        model.load_state_dict(state_dict)
-        model.eval()
-        print(f"Model loaded successfully from {model_path}")
-        return model
-    except Exception as e:
-        print(f"Error loading model from {model_path}: {e}")
-        raise
+# ------------------------------------------------------------
+# 2. Portable image → tensor transform (224 × 224, RGB)
+#    All backbones here expect this, so keep it centralised.
+# ------------------------------------------------------------
+_IMG_TFM = T.Compose(
+    [
+        T.Resize((224, 224)),
+        T.ToTensor(),
+        T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+    ]
+)
 
+# ------------------------------------------------------------
+# 3. Generic prediction wrapper
+# ------------------------------------------------------------
 class EmotionModel:
-    def __init__(self, model: nn.Module, device: torch.device):
-        self.device = device
-        self.model = model.to(device)
-        self.model.eval()
-        self.transforms = T.Compose([
-            T.Resize((224, 224)),
-            T.ToTensor(),
-            T.Normalize(mean=[0.485, 0.456, 0.406],
-                        std=[0.229, 0.224, 0.225])
-        ])
-        self.classes = EMOTION_CLASSES
-
-    def predict(self, image: Image.Image) -> dict:
-        x = self.transforms(image).unsqueeze(0).to(self.device)
-        with torch.no_grad():
-            outputs = self.model(x)
-            if isinstance(outputs, (tuple, list)):
-                outputs = outputs[0]
-            probabilities = torch.softmax(outputs, dim=1).squeeze(0).cpu().numpy()
-        return {emotion: float(round(probabilities[i] * 100, 3)) for i, emotion in enumerate(self.classes)}
-
-# Global dictionary to hold all initialized models.
-emotion_models = {}
-
-def init_inference(device: torch.device):
     """
-    Initializes and warms up all available emotion models.
-    Loads two models: "vit_default" and "vit_optimized".
+    Thin wrapper that turns a raw PIL image into a softmax vector.
+    Each backbone loader returns an nn.Module already moved to the given device.
+    """
+
+    def __init__(self, model: torch.nn.Module, device: torch.device) -> None:
+        self.model = model
+        self.device = device
+        self.model.eval()  # just to be safe
+
+    @torch.inference_mode()
+    def predict(self, img: Image.Image) -> Dict[str, float]:
+        x = _IMG_TFM(img.convert("RGB")).unsqueeze(0).to(self.device)
+        logits = self.model(x)  # shape [1, NUM_CLASSES]
+        probs = logits.softmax(dim=-1).squeeze(0).cpu().numpy()
+        return {cls: float(prob) for cls, prob in zip(EMOTION_CLASSES, probs)}
+
+
+# ------------------------------------------------------------
+# 4. Import backbone loaders (each in its own file)
+# ------------------------------------------------------------
+import vit_loader, transnext_loader, shufflevit_loader
+
+
+_LOADER_REGISTRY = {
+    "vit_b16.pth": vit_loader.load_vit_b16,
+    "TransNeXt-B.pth": transnext_loader.load_transnext_b,
+    "ShuffleViT-DFER.t7": shufflevit_loader.load_shufflevit_dfer,
+}
+
+# ------------------------------------------------------------
+# 5. Public dict holding ready-to-serve models
+# ------------------------------------------------------------
+emotion_models: Dict[str, EmotionModel] = {}
+
+# ------------------------------------------------------------
+# 6. Initialise / warm-up
+# ------------------------------------------------------------
+def _ckpt_path(name: str) -> pathlib.Path:
+    """
+    Return checkpoint path for a given backbone name, e.g.  'vit_b16' →
+    Application/emotion-services/app/models/vit_b16.pth
+    """
+    here = pathlib.Path(__file__).resolve().parent
+    return here / "models" / f"{name}"
+
+
+def init_inference(device: torch.device | None = None) -> None:
+    """
+    Load every backbone found in `_LOADER_REGISTRY`.  For each key `k` we look
+    for `models/{k}.pth`; if the file is missing we fall back to ImageNet
+    weights provided by the loader.
     """
     global emotion_models
-    base_dir = os.path.join(os.path.dirname(__file__), 'models')
-    path_default = os.path.join(base_dir, 'vit_b16_fer2013.pth')
-    path_optimized = os.path.join(base_dir, 'vit_b16_fer2013_optimized.pth')
-    path_resnet50 = os.path.join(base_dir, 'resnet50_fer2013.pth')
-    
-    try:
-        model_default = load_emotion_pretrained_model_local(path_default, device, optimized=False)
-        emotion_models["vit_default"] = EmotionModel(model_default, device)
-    except Exception as e:
-        print(f"Failed to load default model: {e}")
+    if emotion_models:
+        return  # already initialised
 
-    try:
-        model_optimized = load_emotion_pretrained_model_local(path_optimized, device, optimized=True)
-        emotion_models["vit_optimized"] = EmotionModel(model_optimized, device)
-    except Exception as e:
-        print(f"Failed to load optimized model: {e}")
-        
-    try:
-        resnet50_model = load_resnet50_model(path_resnet50, device)
-        emotion_models["resnet50"] = ResNetEmotionModel(resnet50_model, device)
-    except Exception as e:
-        print(f"Failed to load ResNet50 model: {e}")
-    
-    if not emotion_models:
-        raise RuntimeError("No emotion models could be loaded. Check your model files.")
-    
-    # Warm up each loaded model with a dummy inference using a progress bar.
-    dummy = Image.new("RGB", (224, 224), color="white")
-    for key in tqdm(emotion_models, desc="Warming up models"):
+    device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"[inference] Using device: {device}")
+
+    for name, loader in _LOADER_REGISTRY.items():
+        ckpt = _ckpt_path(name)
         try:
-            _ = emotion_models[key].predict(dummy)
-            print(f"Model '{key}' warmed up.")
-        except Exception as e:
-            print(f"Error warming up model '{key}': {e}")
-    
-    print("All available inference models initialized:", list(emotion_models.keys()))
+            model = loader(ckpt if ckpt.exists() else None, device)
+            emotion_models[name] = EmotionModel(model, device)
+            print(f"[✓] {name} loaded")
+        except Exception as exc:  # pragma: no cover
+            print(f"[✗] {name} failed: {exc}")
 
-# Set up Haar Cascade for face detection.
-face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+    if not emotion_models:
+        raise RuntimeError("No emotion models could be loaded — check your checkpoints")
 
-def detect_and_annotate(image: Image.Image, model_key: str) -> Tuple[Image.Image, dict]:
+    # -------- warm-up (single dummy inference) -------------------------------
+    dummy = Image.new("RGB", (224, 224), "white")
+    for name in tqdm(emotion_models, desc="Warming-up models"):
+        _ = emotion_models[name].predict(dummy)
+    print("[inference] Ready models:", ", ".join(emotion_models))
+
+
+# ------------------------------------------------------------
+# 7. Face detection + annotation utility (FastAPI depends on it)
+# ------------------------------------------------------------
+_face_cascade = cv2.CascadeClassifier(
+    cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+)
+
+
+def detect_and_annotate(
+    image: Image.Image, model_key: str
+) -> Tuple[Image.Image, Dict[str, float]]:
     """
-    Accepts a PIL image, selects the specified model via model_key,
-    detects the largest face, draws a bounding box, and returns the annotated image
-    along with the emotion state map.
+    • Detect the largest face (simple Haar cascade).
+    • Draw the bounding box.
+    • Run the selected emotion model.
+    • Return (annotated PIL image, {class: prob})
     """
-    if not emotion_models or model_key not in emotion_models:
-        raise RuntimeError("Model not initialized or invalid model key. Call init_inference() first.")
-    
-    selected_model = emotion_models[model_key]
-    
-    cv_image = np.array(image.convert("RGB"))
-    cv_image = cv_image[:, :, ::-1]  # Convert RGB to BGR
-    cv_image = np.ascontiguousarray(cv_image)
-    
-    gray = cv2.cvtColor(cv_image, cv2.COLOR_BGR2GRAY)
-    faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5)
+    if model_key not in emotion_models:
+        raise KeyError(f"Model '{model_key}' is not initialised")
+
+    cv_img = cv2.cvtColor(np.array(image.convert("RGB")), cv2.COLOR_RGB2BGR)
+    gray = cv2.cvtColor(cv_img, cv2.COLOR_BGR2GRAY)
+    faces = _face_cascade.detectMultiScale(gray, 1.1, 5)
+
+    # only proceed if at least one face was found
     if len(faces) > 0:
-        faces = sorted(faces, key=lambda x: x[2]*x[3], reverse=True)
-        x, y, w, h = faces[0]
-        cv2.rectangle(cv_image, (x, y), (x+w, y+h), (0, 255, 0), 2)
-    else:
-        x, y, w, h = 10, 10, 50, 50
+        # pick the largest face -> (x, y, w, h)
+        x, y, w, h = max(faces, key=lambda f: f[2] * f[3])
+        cv2.rectangle(cv_img, (x, y), (x + w, y + h), (0, 255, 0), 2)
 
-    annotated_image = Image.fromarray(cv2.cvtColor(cv_image, cv2.COLOR_BGR2RGB))
-    emotion_results = selected_model.predict(image)
-    return annotated_image, emotion_results
+    annotated = Image.fromarray(cv2.cvtColor(cv_img, cv2.COLOR_BGR2RGB))
+    probs = emotion_models[model_key].predict(image)
+    return annotated, probs
 
-def load_resnet50_model(model_path: str, device: torch.device) -> nn.Module:
-    print(f"Loading ResNet50 model from {model_path} ...")
-    resnet50 = models.resnet50(weights=None)
-    resnet50.fc = nn.Linear(resnet50.fc.in_features, NUM_CLASSES)
-    resnet50 = resnet50.to(device)
-    state_dict = torch.load(model_path, map_location=device)
-    resnet50.load_state_dict(state_dict)
-    resnet50.eval()
-    print("ResNet50 model loaded successfully!")
-    return resnet50
-
-class ResNetEmotionModel:
-    def __init__(self, model: nn.Module, device: torch.device):
-        self.device = device
-        self.model = model.to(device)
-        self.model.eval()
-        self.transforms = T.Compose([
-            T.Resize((224, 224)),
-            T.ToTensor(),
-            T.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
-        ])
-        self.classes = EMOTION_CLASSES
-
-    def predict(self, image: Image.Image) -> dict:
-        x = self.transforms(image).unsqueeze(0).to(self.device)
-        with torch.no_grad():
-            outputs = self.model(x)
-            probabilities = torch.softmax(outputs, dim=1).squeeze(0).cpu().numpy()
-        return {emotion: float(round(probabilities[i] * 100, 3)) for i, emotion in enumerate(self.classes)}

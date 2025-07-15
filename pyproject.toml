@@ -1,0 +1,17 @@
+[project]
+name = "survey-vit"
+version = "0.0.1"
+description = "Emotion-recognition demo with ViT variants"
+authors = [{name = "Your Name"}]
+readme = "README.md"
+requires-python = ">=3.13"
+
+[project.urls]
+repository = "https://github.com/anhnd3/survey-vit"
+
+[tool.setuptools.packages.find]
+include = [
+    "Application",
+    "ShuffViT_DFER",
+    "TransNeXt",
+]
