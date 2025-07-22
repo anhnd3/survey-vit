@@ -133,4 +133,4 @@ For questions or support, contact:
 
 ## License
 
-Specify license here (e.g., MIT, Apache 2.0)
+Apache 2.0
