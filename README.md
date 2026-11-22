@@ -125,7 +125,7 @@ results/
 
 For questions or support, contact:
 
-- Nguyễn Duy Anh - 24C15002 - <24C15002@student.hcmus.edu.vn>
+- Nguyễn Duy Anh - <anhnd03@gmail.com>
 
 ---
 
