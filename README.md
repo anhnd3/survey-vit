@@ -1,5 +1,19 @@
 # Emotion Recognition with Vision Transformers and Hybrid Models
 
+## Research article
+
+[Vision Transformers for Facial Expression Recognition: Architecture and Efficiency Trade-offs](https://anhnd3.github.io/research-portfolio/articles/vision-transformers-facial-expression-recognition/) — an experimental retrospective of the 2025 FER-2013 study, covering architecture choices, reported accuracy, inference latency and evaluation limitations.
+
+| Evaluated configuration | Parameters | Reported accuracy |
+| --- | ---: | ---: |
+| ViT-B/16 | 85.80M | 64.93% |
+| TransNeXt-B | 88.96M | 65.60% |
+| ShuffViT-DFER | 6.22M | **67.07%** |
+
+These are historical results from the study, not a newly rerun benchmark.
+
+---
+
 ## Project Overview
 
 This repository contains:
