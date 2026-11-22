@@ -121,13 +121,11 @@ results/
 
 ---
 
-## Team & Contact
+## Contact
 
 For questions or support, contact:
 
 - Nguyễn Duy Anh - 24C15002 - <24C15002@student.hcmus.edu.vn>
-- Nguyễn Phạm Khôi Nguyên - 24C15013 - <24C15013@student.hcmus.edu.vn>
-- Nguyễn Trọng Phúc - 24C15019 - <24C15019@student.hcmus.edu.vn>
 
 ---
 
